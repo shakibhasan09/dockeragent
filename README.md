@@ -5,6 +5,7 @@ A lightweight Go HTTP API for managing Docker containers via the Docker Engine A
 ## Features
 
 - Full container lifecycle management (create, list, inspect, stop, remove)
+- Host file writing with configurable permissions
 - Real-time log streaming via Server-Sent Events (SSE)
 - API key authentication on all protected routes
 - Resource limits (CPU, memory) per container
@@ -193,6 +194,38 @@ Non-follow response:
 ```
 
 Follow mode streams as `text/event-stream` (SSE).
+
+### Write File
+
+```
+POST /api/v1/files
+```
+
+Writes a file to the host filesystem. Parent directories are created automatically.
+
+```json
+{
+  "path": "/etc/nginx/nginx.conf",
+  "content": "server { listen 80; }",
+  "permission": "0644"
+}
+```
+
+| Field        | Required | Default | Description                          |
+| ------------ | -------- | ------- | ------------------------------------ |
+| `path`       | Yes      | -       | Absolute file path on the host       |
+| `content`    | No       | `""`    | File content as a string             |
+| `permission` | No       | `0644`  | Unix file permission (octal string)  |
+
+Response (`201 Created`):
+
+```json
+{
+  "path": "/etc/nginx/nginx.conf",
+  "size": 21,
+  "message": "file written successfully"
+}
+```
 
 ## Error Responses
 
