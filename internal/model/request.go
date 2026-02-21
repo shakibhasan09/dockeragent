@@ -66,3 +66,10 @@ type LogsQuery struct {
 	Until      string `query:"until"`
 	Timestamps bool   `query:"timestamps"`
 }
+
+// WriteFileRequest is the JSON body for POST /api/v1/files.
+type WriteFileRequest struct {
+	Path       string `json:"path"`
+	Content    string `json:"content"`
+	Permission string `json:"permission,omitempty"`
+}

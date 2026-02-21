@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -115,13 +116,20 @@ func TestErrorHandler_GenericError(t *testing.T) {
 
 // --- Route auth tests ---
 
+type mockFileService struct{}
+
+func (m *mockFileService) WriteFile(_ context.Context, _ model.WriteFileRequest) (model.WriteFileResponse, error) {
+	return model.WriteFileResponse{Path: "/tmp/test", Size: 2, Message: "file written successfully"}, nil
+}
+
 func newTestRouterApp(svc *mockService, apiKey string) *fiber.App {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: ErrorHandler,
 	})
-	h := handler.NewContainerHandler(svc)
+	ch := handler.NewContainerHandler(svc)
+	fh := handler.NewFileHandler(&mockFileService{})
 	cfg := config.Config{APIKey: apiKey}
-	Setup(app, h, cfg)
+	Setup(app, ch, fh, cfg)
 	return app
 }
 
@@ -176,5 +184,34 @@ func TestRoutes_APIWithInvalidKey(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestRoutes_FilesRequiresAuth(t *testing.T) {
+	app := newTestRouterApp(&mockService{}, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/files", strings.NewReader(`{"path":"/tmp/test","content":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestRoutes_FilesWithValidKey(t *testing.T) {
+	app := newTestRouterApp(&mockService{}, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/files", strings.NewReader(`{"path":"/tmp/test","content":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "secret")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected 201, got %d", resp.StatusCode)
 	}
 }

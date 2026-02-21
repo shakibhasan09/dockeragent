@@ -40,22 +40,25 @@ func ErrorHandler(c fiber.Ctx, err error) error {
 	})
 }
 
-func Setup(app *fiber.App, h *handler.ContainerHandler, cfg config.Config) {
+func Setup(app *fiber.App, ch *handler.ContainerHandler, fh *handler.FileHandler, cfg config.Config) {
 	app.Use(recover.New())
 	app.Use(requestid.New())
 	app.Use(requestLogger())
 
-	app.Get("/health", h.HealthCheck)
+	app.Get("/health", ch.HealthCheck)
 
 	api := app.Group("/api/v1", middleware.NewAPIKeyAuth(cfg))
 
 	containers := api.Group("/containers")
-	containers.Post("/", h.CreateContainer)
-	containers.Get("/", h.ListContainers)
-	containers.Get("/:id", h.InspectContainer)
-	containers.Post("/:id/stop", h.StopContainer)
-	containers.Delete("/:id", h.RemoveContainer)
-	containers.Get("/:id/logs", h.GetContainerLogs)
+	containers.Post("/", ch.CreateContainer)
+	containers.Get("/", ch.ListContainers)
+	containers.Get("/:id", ch.InspectContainer)
+	containers.Post("/:id/stop", ch.StopContainer)
+	containers.Delete("/:id", ch.RemoveContainer)
+	containers.Get("/:id/logs", ch.GetContainerLogs)
+
+	files := api.Group("/files")
+	files.Post("/", fh.WriteFile)
 }
 
 func requestLogger() fiber.Handler {

@@ -32,11 +32,14 @@ func main() {
 	containerSvc := service.NewContainerService(dockerClient)
 	containerHandler := handler.NewContainerHandler(containerSvc)
 
+	fileSvc := service.NewFileService(service.OSFileSystem{})
+	fileHandler := handler.NewFileHandler(fileSvc)
+
 	app := fiber.New(fiber.Config{
 		ErrorHandler: router.ErrorHandler,
 	})
 
-	router.Setup(app, containerHandler, cfg)
+	router.Setup(app, containerHandler, fileHandler, cfg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

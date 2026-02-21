@@ -44,3 +44,9 @@ type HealthResponse struct {
 	Docker    string `json:"docker"`
 	Timestamp string `json:"timestamp"`
 }
+
+type WriteFileResponse struct {
+	Path    string `json:"path"`
+	Size    int64  `json:"size"`
+	Message string `json:"message"`
+}
