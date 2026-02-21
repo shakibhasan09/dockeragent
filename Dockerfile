@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o /bin/dockeragent ./cmd/dockeragent
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/dockeragent ./cmd/dockeragent
 
 FROM alpine:3.21
 

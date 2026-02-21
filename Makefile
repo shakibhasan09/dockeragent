@@ -17,3 +17,6 @@ vet:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+docker-build:
+	docker build --platform linux/amd64 -t sakibhasanme09/dockeragent:latest .
