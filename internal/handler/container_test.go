@@ -553,8 +553,7 @@ func TestGetContainerLogs_NonFollow_Empty(t *testing.T) {
 		Lines []string `json:"lines"`
 	}
 	json.NewDecoder(resp.Body).Decode(&body)
-	// lines should be nil or empty
-	if body.Lines != nil && len(body.Lines) != 0 {
+	if len(body.Lines) != 0 {
 		t.Errorf("expected nil or empty lines, got %v", body.Lines)
 	}
 }
