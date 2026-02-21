@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 )
@@ -10,13 +11,21 @@ type Config struct {
 	APIKey     string
 }
 
-func Load() Config {
+func LoadWithError() (Config, error) {
 	cfg := Config{
 		ListenAddr: envOrDefault("LISTEN_ADDR", ":3000"),
 		APIKey:     os.Getenv("API_KEY"),
 	}
 	if cfg.APIKey == "" {
-		slog.Error("API_KEY environment variable is required")
+		return Config{}, fmt.Errorf("API_KEY environment variable is required")
+	}
+	return cfg, nil
+}
+
+func Load() Config {
+	cfg, err := LoadWithError()
+	if err != nil {
+		slog.Error(err.Error())
 		os.Exit(1)
 	}
 	return cfg

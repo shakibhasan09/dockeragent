@@ -2,21 +2,34 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/moby/moby/api/types/container"
 
 	"github.com/shakibhasan09/dockeragent/internal/model"
-	"github.com/shakibhasan09/dockeragent/internal/service"
 )
 
-type ContainerHandler struct {
-	svc *service.ContainerService
+// ContainerServicer is the service interface used by ContainerHandler.
+type ContainerServicer interface {
+	Create(ctx context.Context, req model.CreateContainerRequest) (model.CreateContainerResponse, error)
+	List(ctx context.Context, all bool) (model.ContainerListResponse, error)
+	Inspect(ctx context.Context, id string) (container.InspectResponse, error)
+	Stop(ctx context.Context, id string, req model.StopContainerRequest) error
+	Remove(ctx context.Context, id string, q model.RemoveContainerQuery) error
+	Logs(ctx context.Context, id string, q model.LogsQuery) (io.ReadCloser, error)
+	Ping(ctx context.Context) error
 }
 
-func NewContainerHandler(svc *service.ContainerService) *ContainerHandler {
+type ContainerHandler struct {
+	svc ContainerServicer
+}
+
+func NewContainerHandler(svc ContainerServicer) *ContainerHandler {
 	return &ContainerHandler{svc: svc}
 }
 

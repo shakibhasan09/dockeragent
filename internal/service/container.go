@@ -14,11 +14,23 @@ import (
 	"github.com/shakibhasan09/dockeragent/internal/model"
 )
 
-type ContainerService struct {
-	docker *client.Client
+// DockerClient is the subset of the Docker client API used by ContainerService.
+type DockerClient interface {
+	ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error)
+	ContainerStart(ctx context.Context, containerID string, options client.ContainerStartOptions) (client.ContainerStartResult, error)
+	ContainerList(ctx context.Context, options client.ContainerListOptions) (client.ContainerListResult, error)
+	ContainerInspect(ctx context.Context, containerID string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error)
+	ContainerStop(ctx context.Context, containerID string, options client.ContainerStopOptions) (client.ContainerStopResult, error)
+	ContainerRemove(ctx context.Context, containerID string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error)
+	ContainerLogs(ctx context.Context, containerID string, options client.ContainerLogsOptions) (client.ContainerLogsResult, error)
+	Ping(ctx context.Context, options client.PingOptions) (client.PingResult, error)
 }
 
-func NewContainerService(docker *client.Client) *ContainerService {
+type ContainerService struct {
+	docker DockerClient
+}
+
+func NewContainerService(docker DockerClient) *ContainerService {
 	return &ContainerService{docker: docker}
 }
 
