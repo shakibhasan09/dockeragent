@@ -47,17 +47,18 @@ docker run -d \
   -e API_KEY=your-secret-key \
   -p 3000:3000 \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /:/host \
   dockeragent
 ```
 
 ## Configuration
 
-| Variable             | Required | Default | Description                          |
-| -------------------- | -------- | ------- | ------------------------------------ |
-| `API_KEY`            | Yes      | -       | API key for authenticating requests  |
-| `LISTEN_ADDR`        | No       | `:3000` | Address the server listens on        |
-| `DOCKER_HOST`        | No       | -       | Docker daemon socket/host            |
-| `DOCKER_API_VERSION` | No       | -       | Docker API version override          |
+| Variable             | Required | Default | Description                         |
+| -------------------- | -------- | ------- | ----------------------------------- |
+| `API_KEY`            | Yes      | -       | API key for authenticating requests |
+| `LISTEN_ADDR`        | No       | `:3000` | Address the server listens on       |
+| `DOCKER_HOST`        | No       | -       | Docker daemon socket/host           |
+| `DOCKER_API_VERSION` | No       | -       | Docker API version override         |
 
 ## API
 
@@ -132,9 +133,9 @@ Response (`201 Created`):
 GET /api/v1/containers?all=true
 ```
 
-| Query Param | Default | Description                        |
-| ----------- | ------- | ---------------------------------- |
-| `all`       | `false` | Include stopped containers         |
+| Query Param | Default | Description                |
+| ----------- | ------- | -------------------------- |
+| `all`       | `false` | Include stopped containers |
 
 ### Inspect Container
 
@@ -163,9 +164,9 @@ POST /api/v1/containers/:id/stop
 DELETE /api/v1/containers/:id?force=true&v=true
 ```
 
-| Query Param | Default | Description                        |
-| ----------- | ------- | ---------------------------------- |
-| `force`     | `false` | Force remove a running container   |
+| Query Param | Default | Description                         |
+| ----------- | ------- | ----------------------------------- |
+| `force`     | `false` | Force remove a running container    |
 | `v`         | `false` | Remove associated anonymous volumes |
 
 ### Get Container Logs
@@ -174,13 +175,13 @@ DELETE /api/v1/containers/:id?force=true&v=true
 GET /api/v1/containers/:id/logs?tail=100&follow=false
 ```
 
-| Query Param  | Default | Description                          |
-| ------------ | ------- | ------------------------------------ |
-| `follow`     | `false` | Stream logs in real-time via SSE     |
-| `tail`       | `all`   | Number of lines from the end         |
-| `since`      | -       | Show logs since timestamp            |
-| `until`      | -       | Show logs until timestamp            |
-| `timestamps` | `false` | Include timestamps in log lines      |
+| Query Param  | Default | Description                      |
+| ------------ | ------- | -------------------------------- |
+| `follow`     | `false` | Stream logs in real-time via SSE |
+| `tail`       | `all`   | Number of lines from the end     |
+| `since`      | -       | Show logs since timestamp        |
+| `until`      | -       | Show logs until timestamp        |
+| `timestamps` | `false` | Include timestamps in log lines  |
 
 Non-follow response:
 
@@ -211,11 +212,11 @@ Writes a file to the host filesystem. Parent directories are created automatical
 }
 ```
 
-| Field        | Required | Default | Description                          |
-| ------------ | -------- | ------- | ------------------------------------ |
-| `path`       | Yes      | -       | Absolute file path on the host       |
-| `content`    | No       | `""`    | File content as a string             |
-| `permission` | No       | `0644`  | Unix file permission (octal string)  |
+| Field        | Required | Default | Description                         |
+| ------------ | -------- | ------- | ----------------------------------- |
+| `path`       | Yes      | -       | Absolute file path on the host      |
+| `content`    | No       | `""`    | File content as a string            |
+| `permission` | No       | `0644`  | Unix file permission (octal string) |
 
 Response (`201 Created`):
 
@@ -245,13 +246,13 @@ All errors return a consistent JSON envelope:
 Request -> recover -> requestid -> requestLogger -> [keyauth] -> handler -> service -> Docker daemon
 ```
 
-| Layer        | Responsibility                                          |
-| ------------ | ------------------------------------------------------- |
-| `handler`    | HTTP concerns: parse input, validate, return JSON       |
-| `service`    | Translate between API models and Docker API types       |
-| `model`      | Pure data types for API request/response contracts      |
-| `router`     | Middleware chain and route registration                 |
-| `middleware`  | API key authentication via `X-API-Key` header          |
+| Layer        | Responsibility                                     |
+| ------------ | -------------------------------------------------- |
+| `handler`    | HTTP concerns: parse input, validate, return JSON  |
+| `service`    | Translate between API models and Docker API types  |
+| `model`      | Pure data types for API request/response contracts |
+| `router`     | Middleware chain and route registration            |
+| `middleware` | API key authentication via `X-API-Key` header      |
 
 ## License
 

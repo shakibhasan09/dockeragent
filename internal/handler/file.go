@@ -40,7 +40,7 @@ func (h *FileHandler) WriteFile(c fiber.Ctx) error {
 	if strings.Contains(cleaned, "..") {
 		return fiber.NewError(fiber.StatusBadRequest, "path must not contain '..'")
 	}
-	req.Path = cleaned
+	req.Path = filepath.Join("/host", cleaned)
 
 	if req.Permission != "" {
 		if _, err := strconv.ParseUint(req.Permission, 8, 32); err != nil {
@@ -53,6 +53,7 @@ func (h *FileHandler) WriteFile(c fiber.Ctx) error {
 	if err != nil {
 		return classifyFileError(err)
 	}
+	resp.Path = cleaned
 	return c.Status(fiber.StatusCreated).JSON(resp)
 }
 
