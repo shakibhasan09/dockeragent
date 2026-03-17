@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 
@@ -44,6 +45,17 @@ func Setup(app *fiber.App, ch *handler.ContainerHandler, fh *handler.FileHandler
 	app.Use(recover.New())
 	app.Use(requestid.New())
 	app.Use(requestLogger())
+	app.Use(limiter.New(limiter.Config{
+		Max:        100,
+		Expiration: 1 * time.Minute,
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(model.ErrorResponse{
+				Error:   http.StatusText(fiber.StatusTooManyRequests),
+				Message: "rate limit exceeded, try again later",
+				Status:  fiber.StatusTooManyRequests,
+			})
+		},
+	}))
 
 	app.Get("/health", ch.HealthCheck)
 

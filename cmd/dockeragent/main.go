@@ -36,7 +36,8 @@ func main() {
 	fileHandler := handler.NewFileHandler(fileSvc)
 
 	app := fiber.New(fiber.Config{
-		ErrorHandler: router.ErrorHandler,
+		ErrorHandler:  router.ErrorHandler,
+		BodyLimit:     10 * 1024 * 1024, // 10 MB
 	})
 
 	router.Setup(app, containerHandler, fileHandler, cfg)

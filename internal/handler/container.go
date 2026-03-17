@@ -5,14 +5,50 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/gofiber/fiber/v3"
 	"github.com/moby/moby/api/types/container"
 
 	"github.com/shakibhasan09/dockeragent/internal/model"
 )
+
+// validSignals is the set of accepted POSIX signal names for container stop.
+var validSignals = map[string]bool{
+	"SIGABRT":   true,
+	"SIGALRM":   true,
+	"SIGBUS":    true,
+	"SIGCHLD":   true,
+	"SIGCONT":   true,
+	"SIGFPE":    true,
+	"SIGHUP":    true,
+	"SIGILL":    true,
+	"SIGINT":    true,
+	"SIGIO":     true,
+	"SIGIOT":    true,
+	"SIGKILL":   true,
+	"SIGPIPE":   true,
+	"SIGPROF":   true,
+	"SIGQUIT":   true,
+	"SIGSEGV":   true,
+	"SIGSTOP":   true,
+	"SIGSYS":    true,
+	"SIGTERM":   true,
+	"SIGTRAP":   true,
+	"SIGTSTP":   true,
+	"SIGTTIN":   true,
+	"SIGTTOU":   true,
+	"SIGURG":    true,
+	"SIGUSR1":   true,
+	"SIGUSR2":   true,
+	"SIGVTALRM": true,
+	"SIGWINCH":  true,
+	"SIGXCPU":   true,
+	"SIGXFSZ":   true,
+}
 
 // ContainerServicer is the service interface used by ContainerHandler.
 type ContainerServicer interface {
@@ -62,6 +98,18 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx) error {
 		if p.ContainerPort == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "ports[].container_port is required")
 		}
+		port, err := strconv.Atoi(p.ContainerPort)
+		if err != nil || port < 1 || port > 65535 {
+			return fiber.NewError(fiber.StatusBadRequest,
+				"ports[].container_port must be a number between 1 and 65535")
+		}
+		if p.HostPort != "" {
+			hp, err := strconv.Atoi(p.HostPort)
+			if err != nil || hp < 1 || hp > 65535 {
+				return fiber.NewError(fiber.StatusBadRequest,
+					"ports[].host_port must be a number between 1 and 65535")
+			}
+		}
 	}
 	for _, v := range req.Volumes {
 		if v.Source == "" || v.Target == "" {
@@ -97,7 +145,16 @@ func (h *ContainerHandler) InspectContainer(c fiber.Ctx) error {
 func (h *ContainerHandler) StopContainer(c fiber.Ctx) error {
 	id := c.Params("id")
 	var req model.StopContainerRequest
-	_ = c.Bind().JSON(&req)
+	if c.Body() != nil && len(c.Body()) > 0 {
+		if err := c.Bind().JSON(&req); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "invalid JSON body: "+err.Error())
+		}
+	}
+
+	if req.Signal != "" && !validSignals[strings.ToUpper(req.Signal)] {
+		return fiber.NewError(fiber.StatusBadRequest,
+			"signal must be a valid POSIX signal name (e.g., SIGTERM, SIGKILL)")
+	}
 
 	if err := h.svc.Stop(c.Context(), id, req); err != nil {
 		return classifyDockerError(err)
@@ -172,6 +229,28 @@ func (h *ContainerHandler) HealthCheck(c fiber.Ctx) error {
 
 func classifyDockerError(err error) error {
 	msg := err.Error()
+
+	// Prefer type-based classification via containerd/errdefs.
+	if errdefs.IsNotFound(err) {
+		return fiber.NewError(fiber.StatusNotFound, msg)
+	}
+	if errdefs.IsConflict(err) || errdefs.IsAlreadyExists(err) {
+		return fiber.NewError(fiber.StatusConflict, msg)
+	}
+	if errdefs.IsNotModified(err) {
+		return fiber.NewError(fiber.StatusNotModified, msg)
+	}
+	if errdefs.IsInvalidArgument(err) {
+		return fiber.NewError(fiber.StatusBadRequest, msg)
+	}
+	if errdefs.IsPermissionDenied(err) {
+		return fiber.NewError(fiber.StatusForbidden, msg)
+	}
+	if errdefs.IsUnavailable(err) {
+		return fiber.NewError(fiber.StatusServiceUnavailable, msg)
+	}
+
+	// Fall back to string matching for errors that don't implement errdefs interfaces.
 	if strings.Contains(msg, "not found") || strings.Contains(msg, "No such container") {
 		return fiber.NewError(fiber.StatusNotFound, msg)
 	}
@@ -181,5 +260,6 @@ func classifyDockerError(err error) error {
 	if strings.Contains(msg, "not modified") {
 		return fiber.NewError(fiber.StatusNotModified, msg)
 	}
+
 	return fiber.NewError(fiber.StatusInternalServerError, msg)
 }
