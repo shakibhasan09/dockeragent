@@ -8,8 +8,12 @@ A lightweight Go HTTP API for managing Docker containers via the Docker Engine A
 - Host file writing with configurable permissions
 - Real-time log streaming via Server-Sent Events (SSE)
 - API key authentication on all protected routes
+- Rate limiting (100 requests/minute per IP)
+- Request body size limit (10 MB)
 - Resource limits (CPU, memory) per container
-- Port mappings, volume mounts, network configuration
+- Port mappings with range validation (1-65535), volume mounts, network configuration
+- Signal validation (POSIX signal names) for container stop
+- Symlink traversal protection on file write paths
 - Restart policies
 - Health check endpoint with Docker daemon status
 - Structured JSON logging with request IDs
@@ -62,7 +66,7 @@ docker run -d \
 
 ## API
 
-All `/api/v1/*` routes require the `X-API-Key` header.
+All `/api/v1/*` routes require the `X-API-Key` header. Requests are rate-limited to 100 per minute per IP. Request bodies are limited to 10 MB.
 
 ### Health Check
 
@@ -158,6 +162,8 @@ POST /api/v1/containers/:id/stop
 }
 ```
 
+The `signal` field must be a valid POSIX signal name (e.g., `SIGTERM`, `SIGKILL`, `SIGINT`). The body is optional — sending an empty request will use Docker's defaults.
+
 ### Remove Container
 
 ```
@@ -212,11 +218,13 @@ Writes a file to the host filesystem. Parent directories are created automatical
 }
 ```
 
-| Field        | Required | Default | Description                         |
-| ------------ | -------- | ------- | ----------------------------------- |
-| `path`       | Yes      | -       | Absolute file path on the host      |
-| `content`    | No       | `""`    | File content as a string            |
-| `permission` | No       | `0644`  | Unix file permission (octal string) |
+| Field        | Required | Default | Description                              |
+| ------------ | -------- | ------- | ---------------------------------------- |
+| `path`       | Yes      | -       | Absolute file path on the host           |
+| `content`    | No       | `""`    | File content as a string (max 10 MB)     |
+| `permission` | No       | `0644`  | Unix file permission (octal string)      |
+
+Paths are validated against directory traversal (`..`) and symlink escape attacks. All paths are resolved relative to the `/host` mount inside the container.
 
 Response (`201 Created`):
 
@@ -243,16 +251,25 @@ All errors return a consistent JSON envelope:
 ## Architecture
 
 ```
-Request -> recover -> requestid -> requestLogger -> [keyauth] -> handler -> service -> Docker daemon
+Request -> recover -> requestid -> requestLogger -> limiter -> [keyauth] -> handler -> service -> Docker daemon
 ```
 
-| Layer        | Responsibility                                     |
-| ------------ | -------------------------------------------------- |
-| `handler`    | HTTP concerns: parse input, validate, return JSON  |
-| `service`    | Translate between API models and Docker API types  |
-| `model`      | Pure data types for API request/response contracts |
-| `router`     | Middleware chain and route registration            |
-| `middleware` | API key authentication via `X-API-Key` header      |
+| Layer        | Responsibility                                            |
+| ------------ | --------------------------------------------------------- |
+| `handler`    | HTTP concerns: parse input, validate, return JSON         |
+| `service`    | Translate between API models and Docker API types         |
+| `model`      | Pure data types for API request/response contracts        |
+| `router`     | Middleware chain, rate limiting, and route registration    |
+| `middleware` | API key authentication via `X-API-Key` header             |
+
+### Security
+
+- **Authentication**: API key via `X-API-Key` header on all `/api/v1/*` routes
+- **Rate limiting**: 100 requests/minute per IP address (returns `429 Too Many Requests`)
+- **Body size limit**: 10 MB maximum request body
+- **Input validation**: Port ranges (1-65535), POSIX signal names, octal file permissions
+- **Path traversal protection**: `..` components rejected, symlinks resolved and verified to stay under `/host`
+- **Error classification**: Docker errors mapped via `containerd/errdefs` type assertions with string-matching fallback
 
 ## License
 
