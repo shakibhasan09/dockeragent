@@ -3,6 +3,7 @@ module github.com/shakibhasan09/dockeragent
 go 1.25.4
 
 require (
+	github.com/containerd/errdefs v1.0.0
 	github.com/gofiber/fiber/v3 v3.0.0
 	github.com/moby/moby/api v1.53.0
 	github.com/moby/moby/client v0.2.2
@@ -11,7 +12,6 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
-	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
