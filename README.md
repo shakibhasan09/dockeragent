@@ -1,4 +1,4 @@
-# dockeragent
+# Docker Agent
 
 A lightweight Go HTTP API for managing Docker containers via the Docker Engine API. Provides a clean REST interface with API key authentication, structured JSON responses, and real-time log streaming.
 
