@@ -115,6 +115,12 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx) error {
 		if v.Source == "" || v.Target == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "volumes[].source and volumes[].target are required")
 		}
+		switch v.Type {
+		case "", "bind", "volume", "tmpfs":
+		default:
+			return fiber.NewError(fiber.StatusBadRequest,
+				"volumes[].type must be one of: bind, volume, tmpfs (or omitted)")
+		}
 	}
 
 	resp, err := h.svc.Create(c.Context(), req)
@@ -145,7 +151,7 @@ func (h *ContainerHandler) InspectContainer(c fiber.Ctx) error {
 func (h *ContainerHandler) StopContainer(c fiber.Ctx) error {
 	id := c.Params("id")
 	var req model.StopContainerRequest
-	if c.Body() != nil && len(c.Body()) > 0 {
+	if len(c.Body()) > 0 {
 		if err := c.Bind().JSON(&req); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "invalid JSON body: "+err.Error())
 		}
