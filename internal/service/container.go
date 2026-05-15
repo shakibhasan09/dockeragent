@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/netip"
 
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
@@ -181,9 +182,18 @@ func (s *ContainerService) Remove(ctx context.Context, id string, q model.Remove
 }
 
 func (s *ContainerService) Logs(ctx context.Context, id string, q model.LogsQuery) (io.ReadCloser, error) {
+	// Inspect first to learn whether the container has a TTY. When there
+	// is no TTY, Docker multiplexes stdout/stderr with an 8-byte stdcopy
+	// header per frame; reading those bytes as text would corrupt output.
+	inspect, err := s.docker.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("inspect container: %w", err)
+	}
+	tty := inspect.Container.Config != nil && inspect.Container.Config.Tty
+
 	tail := q.Tail
 	if tail == "" {
-		tail = "100"
+		tail = "all"
 	}
 	result, err := s.docker.ContainerLogs(ctx, id, client.ContainerLogsOptions{
 		ShowStdout: true,
@@ -197,7 +207,39 @@ func (s *ContainerService) Logs(ctx context.Context, id string, q model.LogsQuer
 	if err != nil {
 		return nil, fmt.Errorf("container logs: %w", err)
 	}
-	return result, nil
+	if tty {
+		return result, nil
+	}
+	return newDemuxReader(result), nil
+}
+
+// newDemuxReader wraps a multiplexed Docker log stream so callers can read
+// it as a flat byte stream of stdout+stderr combined. A goroutine pumps
+// stdcopy frames into an io.Pipe; closing the returned ReadCloser tears
+// down both the pipe and the underlying source.
+func newDemuxReader(src io.ReadCloser) io.ReadCloser {
+	pr, pw := io.Pipe()
+	go func() {
+		_, err := stdcopy.StdCopy(pw, pw, src)
+		_ = pw.CloseWithError(err)
+	}()
+	return &demuxReadCloser{pr: pr, src: src}
+}
+
+type demuxReadCloser struct {
+	pr  *io.PipeReader
+	src io.Closer
+}
+
+func (d *demuxReadCloser) Read(p []byte) (int, error) { return d.pr.Read(p) }
+
+func (d *demuxReadCloser) Close() error {
+	prErr := d.pr.Close()
+	srcErr := d.src.Close()
+	if prErr != nil {
+		return prErr
+	}
+	return srcErr
 }
 
 func (s *ContainerService) Ping(ctx context.Context) error {

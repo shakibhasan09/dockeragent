@@ -608,9 +608,23 @@ type nopCloser struct {
 
 func (nopCloser) Close() error { return nil }
 
+// ttyInspect returns a ContainerInspect mock that reports the requested
+// TTY state. Logs() inspects the container before requesting logs to
+// decide whether the stream is stdcopy-multiplexed.
+func ttyInspect(tty bool) func(ctx context.Context, id string, opts client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	return func(ctx context.Context, id string, opts client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+		return client.ContainerInspectResult{
+			Container: container.InspectResponse{
+				Config: &container.Config{Tty: tty},
+			},
+		}, nil
+	}
+}
+
 func TestLogs_Success_DefaultTail(t *testing.T) {
 	var capturedOpts client.ContainerLogsOptions
 	mock := &mockDockerClient{
+		containerInspectFn: ttyInspect(true),
 		containerLogsFn: func(ctx context.Context, id string, opts client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
 			capturedOpts = opts
 			return nopCloser{strings.NewReader("line1\nline2\n")}, nil
@@ -622,8 +636,8 @@ func TestLogs_Success_DefaultTail(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	defer rc.Close()
-	if capturedOpts.Tail != "100" {
-		t.Errorf("expected Tail=100, got %s", capturedOpts.Tail)
+	if capturedOpts.Tail != "all" {
+		t.Errorf("expected Tail=all, got %s", capturedOpts.Tail)
 	}
 	if !capturedOpts.ShowStdout || !capturedOpts.ShowStderr {
 		t.Error("expected ShowStdout and ShowStderr to be true")
@@ -633,6 +647,7 @@ func TestLogs_Success_DefaultTail(t *testing.T) {
 func TestLogs_Success_CustomOptions(t *testing.T) {
 	var capturedOpts client.ContainerLogsOptions
 	mock := &mockDockerClient{
+		containerInspectFn: ttyInspect(true),
 		containerLogsFn: func(ctx context.Context, id string, opts client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
 			capturedOpts = opts
 			return nopCloser{strings.NewReader("")}, nil
@@ -668,6 +683,7 @@ func TestLogs_Success_CustomOptions(t *testing.T) {
 
 func TestLogs_DockerError(t *testing.T) {
 	mock := &mockDockerClient{
+		containerInspectFn: ttyInspect(false),
 		containerLogsFn: func(ctx context.Context, id string, opts client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
 			return nil, errors.New("not found")
 		},
@@ -679,6 +695,52 @@ func TestLogs_DockerError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "container logs") {
 		t.Errorf("expected 'container logs' in error, got: %v", err)
+	}
+}
+
+func TestLogs_InspectError(t *testing.T) {
+	mock := &mockDockerClient{
+		containerInspectFn: func(ctx context.Context, id string, opts client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+			return client.ContainerInspectResult{}, errors.New("daemon down")
+		},
+	}
+	svc := NewContainerService(mock)
+	_, err := svc.Logs(context.Background(), "bad", model.LogsQuery{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "inspect container") {
+		t.Errorf("expected 'inspect container' in error, got: %v", err)
+	}
+}
+
+// TestLogs_Demuxes_NonTTY verifies that for non-TTY containers we strip the
+// 8-byte stdcopy frame headers Docker prepends to each chunk. Without the
+// demux, those header bytes would corrupt the output.
+func TestLogs_Demuxes_NonTTY(t *testing.T) {
+	// Build a single stdout frame containing "hello\n".
+	payload := []byte("hello\n")
+	frame := []byte{1, 0, 0, 0, 0, 0, 0, byte(len(payload))}
+	frame = append(frame, payload...)
+
+	mock := &mockDockerClient{
+		containerInspectFn: ttyInspect(false),
+		containerLogsFn: func(ctx context.Context, id string, opts client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
+			return nopCloser{strings.NewReader(string(frame))}, nil
+		},
+	}
+	svc := NewContainerService(mock)
+	rc, err := svc.Logs(context.Background(), "c1", model.LogsQuery{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer rc.Close()
+
+	buf := make([]byte, 64)
+	n, _ := io.ReadFull(rc, buf[:len(payload)])
+	got := string(buf[:n])
+	if got != "hello\n" {
+		t.Errorf("expected demuxed payload 'hello\\n', got %q", got)
 	}
 }
 

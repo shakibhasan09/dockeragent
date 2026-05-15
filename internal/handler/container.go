@@ -175,6 +175,11 @@ func (h *ContainerHandler) RemoveContainer(c fiber.Ctx) error {
 	return c.JSON(model.MessageResponse{Message: "container removed"})
 }
 
+// maxLogLineBytes caps a single log line for buffered reads. Lines longer
+// than this are split into chunks rather than dropped, so callers never
+// silently lose output the way bufio.Scanner does at its 64 KB limit.
+const maxLogLineBytes = 1024 * 1024
+
 func (h *ContainerHandler) GetContainerLogs(c fiber.Ctx) error {
 	id := c.Params("id")
 	var q model.LogsQuery
@@ -182,17 +187,24 @@ func (h *ContainerHandler) GetContainerLogs(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid query parameters")
 	}
 
-	reader, err := h.svc.Logs(c.Context(), id, q)
+	// Fiber v3's c.Done() is a no-op (fasthttp limitation), so the request
+	// context never cancels on client disconnect. Derive our own context
+	// and cancel it when the handler tears down so the upstream Docker
+	// socket read doesn't leak.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	reader, err := h.svc.Logs(ctx, id, q)
 	if err != nil {
+		cancel()
 		return classifyDockerError(err)
 	}
 
 	if !q.Follow {
+		defer cancel()
 		defer reader.Close()
-		var lines []string
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
+		lines, err := readLogLines(reader)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "read logs: "+err.Error())
 		}
 		return c.JSON(fiber.Map{"lines": lines})
 	}
@@ -202,15 +214,67 @@ func (h *ContainerHandler) GetContainerLogs(c fiber.Ctx) error {
 	c.Set("Connection", "keep-alive")
 
 	return c.SendStreamWriter(func(w *bufio.Writer) {
+		defer cancel()
 		defer reader.Close()
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			fmt.Fprintf(w, "data: %s\n\n", scanner.Text())
-			if err := w.Flush(); err != nil {
+		br := bufio.NewReaderSize(reader, 32*1024)
+		for {
+			line, err := readBoundedLine(br, maxLogLineBytes)
+			if len(line) > 0 {
+				if _, werr := fmt.Fprintf(w, "data: %s\n\n", line); werr != nil {
+					return
+				}
+				if ferr := w.Flush(); ferr != nil {
+					return
+				}
+			}
+			if err != nil {
 				return
 			}
 		}
 	})
+}
+
+// readLogLines consumes a Docker log stream (already demuxed) and returns
+// each newline-terminated line, capping individual lines at maxLogLineBytes
+// to avoid unbounded memory use on a runaway log producer.
+func readLogLines(r io.Reader) ([]string, error) {
+	br := bufio.NewReaderSize(r, 32*1024)
+	var lines []string
+	for {
+		line, err := readBoundedLine(br, maxLogLineBytes)
+		if len(line) > 0 {
+			lines = append(lines, line)
+		}
+		if err == io.EOF {
+			return lines, nil
+		}
+		if err != nil {
+			return lines, err
+		}
+	}
+}
+
+// readBoundedLine reads up to (and including) the next '\n' or EOF, returning
+// the line without the trailing newline. If max is exceeded before a newline
+// is found, the returned chunk is truncated and the next call will continue
+// from where this one left off — no data is dropped.
+func readBoundedLine(br *bufio.Reader, max int) (string, error) {
+	var buf []byte
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			return string(buf), err
+		}
+		if b == '\n' {
+			return string(buf), nil
+		}
+		if len(buf) >= max {
+			// Push the byte back so the next call picks up here.
+			_ = br.UnreadByte()
+			return string(buf), nil
+		}
+		buf = append(buf, b)
+	}
 }
 
 func (h *ContainerHandler) HealthCheck(c fiber.Ctx) error {
