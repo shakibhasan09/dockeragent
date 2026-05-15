@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -135,14 +136,11 @@ func TestWriteFile_RelativePath(t *testing.T) {
 	}
 }
 
-func TestWriteFile_PathTraversal_DoubleDot(t *testing.T) {
-	// Paths where ".." survives filepath.Clean are rejected.
-	// In practice filepath.Clean resolves ".." so this test uses
-	// the symlink evaluator to verify the /host prefix check.
+func TestWriteFile_SymlinkResolvesOutsideHost(t *testing.T) {
+	// Symlink resolution returns a path that escapes /host — must reject.
 	mock := &mockFileService{}
 	se := &mockSymlinkEvaluator{
 		evalSymlinksFn: func(path string) (string, error) {
-			// Simulate parent resolving outside /host
 			return "/outside/host", nil
 		},
 	}
@@ -150,6 +148,96 @@ func TestWriteFile_PathTraversal_DoubleDot(t *testing.T) {
 	app := newTestApp(h.WriteFile, http.MethodPost, "/files")
 	resp := doRequest(t, app, http.MethodPost, "/files",
 		`{"path":"/etc/passwd","content":"bad"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// TestWriteFile_HostilePrefixRejected covers the bypass where the resolver
+// returns "/hostile/etc" — strings.HasPrefix(p, "/host") would have
+// accepted it; isUnderHost requires "/host" or "/host/".
+func TestWriteFile_HostilePrefixRejected(t *testing.T) {
+	mock := &mockFileService{}
+	se := &mockSymlinkEvaluator{
+		evalSymlinksFn: func(path string) (string, error) {
+			return "/hostile/etc", nil
+		},
+	}
+	h := NewFileHandlerWithSymlinks(mock, se)
+	app := newTestApp(h.WriteFile, http.MethodPost, "/files")
+	resp := doRequest(t, app, http.MethodPost, "/files",
+		`{"path":"/tmp/test.txt","content":"x"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// TestWriteFile_MissingParentWalksUp covers the previously-unprotected
+// branch: when the immediate parent doesn't exist, the handler must walk
+// up to the nearest existing ancestor and verify *that* is under /host —
+// not silently skip the check.
+func TestWriteFile_MissingParentWalksUp_Allowed(t *testing.T) {
+	calls := 0
+	mock := &mockFileService{
+		writeFileFn: func(ctx context.Context, req model.WriteFileRequest) (model.WriteFileResponse, error) {
+			return model.WriteFileResponse{Path: req.Path, Size: 1, Message: "ok"}, nil
+		},
+	}
+	se := &mockSymlinkEvaluator{
+		evalSymlinksFn: func(path string) (string, error) {
+			calls++
+			// Simulate /host/new/dir not existing; /host does.
+			if path == "/host" {
+				return "/host", nil
+			}
+			return "", os.ErrNotExist
+		},
+	}
+	h := NewFileHandlerWithSymlinks(mock, se)
+	app := newTestApp(h.WriteFile, http.MethodPost, "/files")
+	resp := doRequest(t, app, http.MethodPost, "/files",
+		`{"path":"/new/dir/file.txt","content":"x"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected 201, got %d", resp.StatusCode)
+	}
+	if calls < 2 {
+		t.Errorf("expected at least 2 EvalSymlinks calls (walk up), got %d", calls)
+	}
+	resp.Body.Close()
+}
+
+func TestWriteFile_MissingParentWalksUp_RejectedAtAncestor(t *testing.T) {
+	mock := &mockFileService{}
+	se := &mockSymlinkEvaluator{
+		evalSymlinksFn: func(path string) (string, error) {
+			// Whatever ancestor exists, it's outside /host.
+			if path == "/host" {
+				return "/somewhere/else", nil
+			}
+			return "", os.ErrNotExist
+		},
+	}
+	h := NewFileHandlerWithSymlinks(mock, se)
+	app := newTestApp(h.WriteFile, http.MethodPost, "/files")
+	resp := doRequest(t, app, http.MethodPost, "/files",
+		`{"path":"/new/file.txt","content":"x"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestWriteFile_PermissionTooLarge(t *testing.T) {
+	mock := &mockFileService{}
+	se := &mockSymlinkEvaluator{
+		evalSymlinksFn: func(path string) (string, error) { return path, nil },
+	}
+	h := NewFileHandlerWithSymlinks(mock, se)
+	app := newTestApp(h.WriteFile, http.MethodPost, "/files")
+	resp := doRequest(t, app, http.MethodPost, "/files",
+		`{"path":"/tmp/test.txt","content":"x","permission":"77777"}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	"github.com/shakibhasan09/dockeragent/internal/model"
 )
@@ -16,7 +17,12 @@ type FileSystem interface {
 	WriteFile(name string, data []byte, perm os.FileMode) error
 }
 
-// OSFileSystem implements FileSystem using the real os package.
+// OSFileSystem implements FileSystem using the real os package. The
+// WriteFile implementation opens with O_NOFOLLOW so a pre-existing
+// symlink at the target path is rejected (EMLINK / ELOOP) rather than
+// followed — the handler's symlink check only verifies ancestors, so
+// without O_NOFOLLOW a TOCTOU swap or a leaf symlink would still
+// silently write through.
 type OSFileSystem struct{}
 
 func (OSFileSystem) MkdirAll(path string, perm os.FileMode) error {
@@ -24,7 +30,15 @@ func (OSFileSystem) MkdirAll(path string, perm os.FileMode) error {
 }
 
 func (OSFileSystem) WriteFile(name string, data []byte, perm os.FileMode) error {
-	return os.WriteFile(name, data, perm)
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 type FileService struct {

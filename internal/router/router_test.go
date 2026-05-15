@@ -122,12 +122,21 @@ func (m *mockFileService) WriteFile(_ context.Context, _ model.WriteFileRequest)
 	return model.WriteFileResponse{Path: "/tmp/test", Size: 2, Message: "file written successfully"}, nil
 }
 
+// passingSymlinkEvaluator returns the input path unchanged so router-level
+// auth tests don't need a real /host mount on the test machine. Path
+// validation is exercised in the handler package's own tests.
+type passingSymlinkEvaluator struct{}
+
+func (passingSymlinkEvaluator) EvalSymlinks(path string) (string, error) {
+	return path, nil
+}
+
 func newTestRouterApp(svc *mockService, apiKey string) *fiber.App {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: ErrorHandler,
 	})
 	ch := handler.NewContainerHandler(svc)
-	fh := handler.NewFileHandler(&mockFileService{})
+	fh := handler.NewFileHandlerWithSymlinks(&mockFileService{}, passingSymlinkEvaluator{})
 	cfg := config.Config{APIKey: apiKey}
 	Setup(app, ch, fh, cfg)
 	return app
