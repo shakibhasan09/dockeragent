@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/subtle"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/extractors"
 	"github.com/gofiber/fiber/v3/middleware/keyauth"
@@ -10,10 +12,11 @@ import (
 )
 
 func NewAPIKeyAuth(cfg config.Config) fiber.Handler {
+	expected := []byte(cfg.APIKey)
 	return keyauth.New(keyauth.Config{
 		Extractor: extractors.FromHeader("X-API-Key"),
 		Validator: func(c fiber.Ctx, key string) (bool, error) {
-			if key == cfg.APIKey {
+			if subtle.ConstantTimeCompare([]byte(key), expected) == 1 {
 				return true, nil
 			}
 			return false, keyauth.ErrMissingOrMalformedAPIKey

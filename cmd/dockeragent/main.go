@@ -36,8 +36,13 @@ func main() {
 	fileHandler := handler.NewFileHandler(fileSvc)
 
 	app := fiber.New(fiber.Config{
-		ErrorHandler:  router.ErrorHandler,
-		BodyLimit:     10 * 1024 * 1024, // 10 MB
+		ErrorHandler: router.ErrorHandler,
+		BodyLimit:    10 * 1024 * 1024, // 10 MB
+		ReadTimeout:  30 * time.Second,
+		// WriteTimeout is intentionally generous to accommodate SSE log
+		// streaming (GET /containers/:id/logs?follow=true).
+		WriteTimeout: 0,
+		IdleTimeout:  120 * time.Second,
 	})
 
 	router.Setup(app, containerHandler, fileHandler, cfg)

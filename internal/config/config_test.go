@@ -1,19 +1,22 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
+const validTestKey = "0123456789abcdef0123456789abcdef" // 32 chars
+
 func TestLoadWithError_Success(t *testing.T) {
-	t.Setenv("API_KEY", "test-key")
+	t.Setenv("API_KEY", validTestKey)
 	t.Setenv("LISTEN_ADDR", "")
 
 	cfg, err := LoadWithError()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.APIKey != "test-key" {
-		t.Errorf("APIKey = %s, want test-key", cfg.APIKey)
+	if cfg.APIKey != validTestKey {
+		t.Errorf("APIKey = %s, want %s", cfg.APIKey, validTestKey)
 	}
 	if cfg.ListenAddr != ":3000" {
 		t.Errorf("ListenAddr = %s, want :3000", cfg.ListenAddr)
@@ -21,7 +24,7 @@ func TestLoadWithError_Success(t *testing.T) {
 }
 
 func TestLoadWithError_CustomListenAddr(t *testing.T) {
-	t.Setenv("API_KEY", "key")
+	t.Setenv("API_KEY", validTestKey)
 	t.Setenv("LISTEN_ADDR", ":8080")
 
 	cfg, err := LoadWithError()
@@ -41,6 +44,18 @@ func TestLoadWithError_MissingAPIKey(t *testing.T) {
 		t.Fatal("expected error for missing API_KEY")
 	}
 	if err.Error() != "API_KEY environment variable is required" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadWithError_TooShortAPIKey(t *testing.T) {
+	t.Setenv("API_KEY", "short")
+
+	_, err := LoadWithError()
+	if err == nil {
+		t.Fatal("expected error for short API_KEY")
+	}
+	if !strings.Contains(err.Error(), "at least") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }

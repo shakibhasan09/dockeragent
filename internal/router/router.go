@@ -45,21 +45,30 @@ func Setup(app *fiber.App, ch *handler.ContainerHandler, fh *handler.FileHandler
 	app.Use(recover.New())
 	app.Use(requestid.New())
 	app.Use(requestLogger())
-	app.Use(limiter.New(limiter.Config{
-		Max:        100,
-		Expiration: 1 * time.Minute,
-		LimitReached: func(c fiber.Ctx) error {
-			return c.Status(fiber.StatusTooManyRequests).JSON(model.ErrorResponse{
-				Error:   http.StatusText(fiber.StatusTooManyRequests),
-				Message: "rate limit exceeded, try again later",
-				Status:  fiber.StatusTooManyRequests,
-			})
-		},
-	}))
 
 	app.Get("/health", ch.HealthCheck)
 
-	api := app.Group("/api/v1", middleware.NewAPIKeyAuth(cfg))
+	// Rate limiter sits behind keyauth so an unauthenticated attacker cannot
+	// burn the bucket and lock out legitimate callers. Keyed on the API key
+	// (already verified at this point) rather than c.IP() because behind a
+	// reverse proxy or LB every request would otherwise share one bucket.
+	api := app.Group("/api/v1",
+		middleware.NewAPIKeyAuth(cfg),
+		limiter.New(limiter.Config{
+			Max:        100,
+			Expiration: 1 * time.Minute,
+			KeyGenerator: func(c fiber.Ctx) string {
+				return c.Get("X-API-Key")
+			},
+			LimitReached: func(c fiber.Ctx) error {
+				return c.Status(fiber.StatusTooManyRequests).JSON(model.ErrorResponse{
+					Error:   http.StatusText(fiber.StatusTooManyRequests),
+					Message: "rate limit exceeded, try again later",
+					Status:  fiber.StatusTooManyRequests,
+				})
+			},
+		}),
+	)
 
 	containers := api.Group("/containers")
 	containers.Post("/", ch.CreateContainer)
